@@ -1,9 +1,23 @@
 #!/usr/bin/env lua
-if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then require("lldebugger").start() end
 
---
--- Misc
---
+--------------------------------------------------------------------------------------------------------------------------------
+-- Bootstrap
+--------------------------------------------------------------------------------------------------------------------------------
+
+---@type string @os type, unix(linux) or nt
+os.type = (function()
+	if package.path:find('/', 1, true) == 1 then return 'unix' else return 'nt' end
+end)()
+
+-- currenly lkitmgr only support unix/linux
+if os.type ~= 'unix' then io.stderr:write("lkitmgr only support unix currenly. \n"); os.exit(1); end
+
+-- END BOOTSTRAP
+
+
+--------------------------------------------------------------------------------------------------------------------------------
+string = string do -- Minimal string lib
+--------------------------------------------------------------------------------------------------------------------------------
 
 --- Just use + to concating strings. + never confusing the code, trust us.
 ---
@@ -11,7 +25,45 @@ if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then require("lldebugger").star
 ---@param another any
 getmetatable("").__add = function(self, another) return self .. tostring(another) end
 
--- Table Base
+--- format string, same as string.format
+function fstring(...) return string.format(...) end
+
+end -- END STRING
+
+--------------------------------------------------------------------------------------------------------------------------------
+table = table do -- Minimal Table lib
+--------------------------------------------------------------------------------------------------------------------------------
+local protected_table_error = function() error("protected table") end
+
+--- dump table content to target, if no target presented, use an empty table
+---@param source table @source table
+---@param target? table @target table, empty raw table if not presented
+---@return table
+table.dump = function(source, target)
+	local target = target or {}
+	for k, v in pairs(source) do target[k] = v end
+	return target
+end
+
+--- protect a table.
+---@param tb table @target table
+---@param mt? table @optional metatable template
+table.protect = function(tb, mt)
+	local new_mt = {}
+	if mt then table.dump(mt, new_mt) end
+	new_mt.__newindex = protected_table_error
+	if not new_mt.__metatable then new_mt.__metatable = false end
+	return setmetatable(tb, new_mt)
+end
+
+---@type table @a protected empty table
+table.empty = (function()
+	local empty = {}
+	empty.__metatable = empty
+	return table.protect(empty, { __metatable = empty })
+end)()
+
+end
 
 --- Swap keys' and values' role, return a new array
 ---@param tb table
