@@ -3,11 +3,12 @@
 --------------------------------------------------------------------------------------------------------------------------------
 -- Bootstrap
 --------------------------------------------------------------------------------------------------------------------------------
+if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then require("lldebugger").start() end
 
 ---@type string @os type, unix(linux) or nt
-os.type = (function()
-	if package.path:find('/', 1, true) == 1 then return 'unix' else return 'nt' end
-end)()
+os.type = (function(condition)
+	if condition then return 'unix' else return 'nt' end
+end)(package.path:find('\\', 1, true) ~= 1)
 
 -- currenly lkitmgr only support unix/linux
 if os.type ~= 'unix' then io.stderr:write("lkitmgr only support unix currenly. \n"); os.exit(1); end
@@ -72,6 +73,21 @@ table.empty = (function()
 	return table.protect(empty, { __metatable = empty })
 end)()
 
+--- Fold table to value
+---@generic T : any
+---@param tb table @source table
+---@param folder fun(acc : T, value : any, key : string|integer, counter : integer):T @fold converter
+---@param initial? T @initial value
+table.fold = function(tb, folder, initial)
+	local acc = initial
+	local counter = 1
+	for k, v in pairs(tb) do
+		acc = folder(acc, v, k, counter)
+		counter = counter + 1
+	end
+	return acc
+end
+
 pack, unpack = table.pack, table.unpack
 
 end -- END TABLE
@@ -86,7 +102,7 @@ shell = {} do -- Minimal shell lib
 ---@return boolean|nil   @success or not
 ---@return string        @process state 
 ---@return integer       @exit code
-shell.execute = function(command)
+function shell:execute(command)
 	local pipe, error = io.popen(command)
 	if not pipe then return nil, ("Could not open pipe for command: " + command) , error end
 	local lines = pipe:read("*a")
@@ -99,7 +115,7 @@ end
 function shell:template(template)
 	return function(...)
 		local command = template:format(...)
-		return self.execute(command)
+		return self:execute(command)
 	end
 end
 
@@ -142,19 +158,11 @@ end)("command -v '%s' 2>&1 > /dev/null")
 ---@param name string @path
 ---@return string @basename of this path
 os.basename = (function(cmd)
-	local template = shell.template(cmd)
+	local template = shell:template(cmd)
 	return function(name)
 		return template(name)
 	end
-end)("basename $(which '%s')")
-
-os.executable = function()
-	local template = "which '%s'"
-	local handle = io.popen(template:format(arg[0]))
-	local name = handle:read()
-	handle:close()
-	return name
-end
+end)("basename %q")
 
 --- put content to stdout
 ---@param str string
@@ -205,8 +213,7 @@ end)("test -f %q 2>&1 > /dev/null")
 fs.initialization = function()
 	fs.work_dir = (function ()
 		local handle, success, state, exit_code = shell:execute("pwd")
-		if not handle then error("Could not get current directory"); end
-		return path
+		return handle or error("Could not get current directory")
 	end)()
 
 	fs.initialization = nil
@@ -223,7 +230,7 @@ app.initialization = function(args)
 	app.parameters = (function(args)
 		local is_subcommand, mgr_arg, sub_arg = false, {}, {}
 		for _, arg in ipairs(args) do
-			if not is_subcommand and arg:find('-', 1, true) == 0 then is_subcommand = true; end
+			if not is_subcommand and not arg:find('-', 1, true) then is_subcommand = true end
 
 			if is_subcommand then table.insert(sub_arg, arg)
 			else table.insert(mgr_arg, arg) end
@@ -231,7 +238,7 @@ app.initialization = function(args)
 			::continue::
 		end
 		return { manager = mgr_arg; subcommand = sub_arg; }
-	end)(pack(unpack(args, 2)))
+	end)(pack(unpack(args, 1)))
 
 	fs.initialization()
 	-- handle entry
@@ -244,7 +251,7 @@ app.initialization = function(args)
 	path.home = (function()
 		local value = os.getenv("LKITMGR_HOME") or fs.work_dir
 		if not fs.is_directory_exists(value) then os.exit(1, fstring("%q is not a valid LKitManager home.", value)) end
-		return value
+		return value:trim()
 	end)()
 
 	path.binaries  = path.home + "/bin"
@@ -254,6 +261,41 @@ app.initialization = function(args)
 	package.path = path.libraries + "/?.lua;" + package.path
 
 	app.path = path
+
+	function app:build_help_string()
+		return table.fold({
+			"LKit Manager - Manager for ANYTING that can becomes a kit. (in lua)\n";
+			"Usage: ./bin/lkitmgr <manager args...> subcommand <subcommand args...>\n";
+			"Manager options:\n";
+			" -d | --debug    Enable debug \n";
+			" -i | --info     Print informations \n";
+			" -h | --help     Print this help \n";
+			" -v | --verbose  Enable verbose message \n";
+		}, function(acc, value) return acc + value end, "")
+	end
+
+	function app:build_info_string()
+		return table.fold({
+			fstring("App Entry     : %s \n", app.entry);
+			fstring("App Home      : %s \n", app.path.home);
+			fstring("App Binaries  : %s \n", app.path.binaries);
+			fstring("App Libraries : %s \n", app.path.libraries);
+		}, function(acc, value) return acc + value end, "")
+	end
+end
+
+function app.main(args)
+	app.main = nil
+	app.initialization(args)
+
+	-- process parameters
+	for _, arg in ipairs(app.parameters.manager) do
+		if     arg == '-d' or arg == '--debug'   then app.debug   = true
+		elseif arg == '-v' or arg == '--verbose' then app.verbose = true
+		elseif arg == '-h' or arg == '--help'    then os.exit(0, app:build_help_string())
+		elseif arg == '-i' or arg == '--info'    then os.exit(0, app:build_info_string())
+		end
+	end
 end
 
 end -- END APP
@@ -262,7 +304,7 @@ end -- END APP
 if not arg or not arg[0]
 then return app
 else
-	local _, error = pcall(app.initialization, arg)
+	local _, error = pcall(app.main, arg)
 	if error then os.exit(1, fstring("Error: %s", error)) end
 end
 
