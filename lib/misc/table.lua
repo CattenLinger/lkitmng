@@ -77,8 +77,9 @@ end
 local __default_string_converter = function(v) return tostring(v) end
 
 --- join collection items to string
+---@param delimiter? string @delimiter, default is empty string
 ---@param converter? fun(value : any, key : string|integer, counter : integer):string @optional converter, default is tostring(value)
-function table_proto:join_tostring(converter, delimiter)
+function table_proto:join_tostring(delimiter, converter)
     local source = self
     local converter, delimiter = converter or __default_string_converter, delimiter or ""
     local acc, counter = "", 1

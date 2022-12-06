@@ -32,19 +32,35 @@ local function load_feature_file(name)
     return package
 end
 
-function app:msg(...)
+function app_proto:msg(...)
     if self.quiet then return end
     stderr(...)
 end
 
-function app:info(...)
+function app_proto:info(...)
     if self.quite or not self.verbose then return end
     stderr(...)
 end
 
-function app:dbg(...)
+function app_proto:dbg(...)
     if self.quite or not self.debug then return end
     stderr(...)
+end
+
+local function print_information_and_exit()
+    local str = table {
+        app:build_help_string();
+        "Installed features: " + app:list_feature_files():map(function(value) return value:gsub("%.feature%.lua", ""):join_to_string(", ") end);
+        app:build_info_string();
+    }:join_tostring("\n")
+    
+    os.exit(0, str)
+end
+
+function app_proto:main()
+    app_proto.main = nil
+    if #app.parameters.subcommand <= 0 then print_information_and_exit(); return end
+
 end
 
 app = library:create('app', app_proto)

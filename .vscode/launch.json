@@ -23,6 +23,15 @@
             "args": [ "-i" ]
         },
         {
+            "name": "App Launcher [Custom Lua Environment]",
+            "type": "lua-local",
+            "request": "launch",
+            "program": {
+                "command": "${workspaceFolder}/bin/lkitmgr"
+            },
+            "args": []
+        },
+        {
             "name": "Launcher [Debug Lua Interpreter]",
             "type": "lua-local",
             "request": "launch",
