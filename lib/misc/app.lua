@@ -31,10 +31,58 @@ end
 
 local features_proto = {}
 
-function features_proto:has_entry() return (not (not self.entry)) end
-function features_proto:has_store() return (not (not self.store)) end
+function features_proto:has_entry()   return (not (not self.entry))   end
 function features_proto:has_service() return (not (not self.service)) end
-function features_proto:has_dsl_def() return (not (not self.dsl)) end
+
+--- get all services, or get feature's services
+---@param feature_name? string @optional feature name, if not present then get all available services
+---@return table|nil @containing all available service name as key, available as value. if no such feature then returns nil.
+function app_proto:services(feature_name)
+    local service_features = features:filter(function(value) return value:has_service() end)
+    local collection = table {}
+
+    -- if feature_name presented
+    if feature_name then
+        local feature = service_features[feature_name]
+        if not feature then return nil end
+
+        for key, value in pairs(feature) do
+            collection[key] = true
+        end
+
+        return collection
+    end
+
+    -- else get all service name
+    for key, value in service_features:pairs() do
+        for name in pairs(value) do
+            if not collection[name] then collection[name] = true end
+        end
+    end
+    return collection
+end
+
+--- get a service function by path name
+--- path name should be 'service_name.feature_name', feature_name is optional,
+--- if feature name not presented, will use first matched service.
+function app_proto:service(path)
+    local elements = array{}
+    for name in path:gmatch("([^.]+)") do elements:insert(name) end
+    local name, feature_name = unpack(elements)
+    if feature_name then
+        local services = (features[feature_name] or {}).service
+        if not services then return nil end
+        return services[name]
+    end
+
+    local all_features = features:filter(function(value) return value:has_service() end)
+    for _, value in all_features:pairs() do
+        for key, func in pairs(value) do
+            if key == name then return func end
+        end
+    end
+    return nil
+end
 
 local function create_feature(name, proto)
     if features[name] then error(fstring("Feature %q already exists", name)) end
@@ -57,7 +105,7 @@ local function load_feature(name, chain)
         " -> ", 
         function(value) 
             if value == name then return "[" + value + "]" else return value end
-        end))
+        end) + " -> " + "[" + name + "]")
     end
 
     chain[name] = true
@@ -65,7 +113,11 @@ local function load_feature(name, chain)
     local filename = app.path.libraries + "/" + name + ".feature.lua"
     if not fs.is_file_exists(filename) then error("No such feature: " + name) end
     local global, mt = create_feature_load_env({
-        load_feature = function(name) load_feature(name, chain) end;
+        features = function(name) 
+            local feature = load_feature(name, chain)
+            if not feature.service then return table.empty end
+            return table.protected({}, { __index = feature.service })
+        end;
         feature = create_feature;
     })
     local block, err = loadfile(filename, "bt", global)

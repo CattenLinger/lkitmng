@@ -41,6 +41,32 @@ function array_proto:join_tostring(delimiter, converter)
     return acc
 end
 
+--- flatten an array. if value is not a collection type (table or array), add to result directly
+---@return array @result array
+function array_proto:flatten()
+    local source, target = self, array {}
+    for _,value in ipairs(source) do
+        local value_type = typeof(value)
+        if value_type == 'table' or value_type == 'array' then
+            for _, item in pairs(value) do
+                target:insert(item)
+            end
+        else target:insert(value)
+        end
+    end
+    return target
+end
+
+function array_proto:to_map()
+    local source, target = self, table { }
+    for index, value in ipairs(source) do
+        local k, v = unpack(value)
+        if not v then v = k; k = index end
+        target[k] = v
+    end
+    return target
+end
+
 local arraies_mt = { __index = table.indexer(array_proto), is_instance = true, type = 'array' }
 --- Wrap a table as operatable array
 ---@param arr table

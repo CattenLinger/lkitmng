@@ -16,7 +16,9 @@ end
 ---@return integer @item count
 function table_proto:count()
     local count = 0
-	for _ in pairs(self) do count = count + 1 end
+	for k in pairs(self) do
+        if k ~= "__readonly__" then count = count + 1 end
+    end
 	return count
 end
 
@@ -68,12 +70,16 @@ end
 ---@param filter fun(value: any, key : string|integer, count : integer) @filter
 ---@return table @new table containing filtered results
 function table_proto:filter(filter)
-    local source, target, counter = self, {}, 1
+    local source, target, counter = self, table {}, 1
     for k, v in pairs(source) do
         if filter(k, v, counter) then target[k] = v end
         counter = counter + 1
     end
     return target
+end
+
+function table_proto:pairs()
+    return pairs(self)
 end
 
 local __default_string_converter = function(v) return tostring(v) end
@@ -96,12 +102,28 @@ end
 
 --- map table entires
 ---@param converter fun(value : any, key : string|integer, count: integer) @converter
----@return table @new mapped items containing converted result
+---@return table|array @new mapped items containing converted result, returns an array
 function table_proto:map(converter)
     local source, target, counter = self, {}, 1
     for k, v in pairs(source) do
-        target[k] = converter(v, k, counter)
+        table.insert(target, converter(v, k, counter))
         counter = counter + 1
+    end
+    return array(target)
+end
+
+--- Group item by key key_selector
+---@param key_selector fun(value : any, key : string|integer, count : integer) @key selector
+---@return table @grouped result
+function table_proto:group_by(key_selector)
+    local source, target = self, table {}
+    local count = 1
+    for k, v in pairs(source) do
+        local key = key_selector(v, k, count)
+        local bucket = target[key] or array {}
+        bucket:insert(v)
+        target[key] = bucket
+        count = count + 1
     end
     return target
 end
