@@ -1,4 +1,4 @@
-local fs, feature = require "misc.fs", require "misc.feature"
+local fs, library = require "misc.fs", require "misc.library"
 --------------------------------------------------------------------------------------------------------------------------------
 if not library "app" then -- App Lib
 --------------------------------------------------------------------------------------------------------------------------------
@@ -21,10 +21,26 @@ local function create_feature_load_env(initial)
     return table.overlay(_G, initial)
 end
 
-local function load_feature_file(name)
+local function load_feature_file(name, chain)
+    local existed = features[name]
+    if existed then return existed end
+
+    if chain == nil then chain = {}
+    elseif chain[name] then error("Cricular dependency detected: " + array(chain):join_tostring(" -> ", function(value) 
+        if value == name
+        then return "[" + value + "]"
+        else return value
+        end
+    end))
+    end
+
+    chain[name] = true
+
     local filename = app.path.libraries + "/" + name + ".feature.lua"
     if not fs.is_file_exists(filename) then error("No such feature: " + name) end
-    local global, mt = create_feature_load_env({})
+    local global, mt = create_feature_load_env({
+        feature = function(name) load_feature_file(name, chain) end
+    })
     local package, err = loadfile(filename, "bt", global)
     if err then return nil, fstring("Could not load feature %q, error: %s", name, err) end
     if not typeof(package) == 'feature' then error(fstring("Invalid definition of feature %q", name)) end
@@ -48,9 +64,15 @@ function app_proto:dbg(...)
 end
 
 local function print_information_and_exit()
+    local installed_feature_string = array(app:list_feature_files():map(function(value)
+        return value:gsub("%.feature%.lua", "")
+    end)):join_tostring("\n")
+
+    if(installed_feature_string == "") then installed_feature_string = "<no installed features>" end
     local str = table {
         app:build_help_string();
-        "Installed features: " + app:list_feature_files():map(function(value) return value:gsub("%.feature%.lua", ""):join_to_string(", ") end);
+        "Installed features: (try giving '-h' or '--help' to features for help)\n" + installed_feature_string + "\n\n";
+        "-------- Informations --------\n";
         app:build_info_string();
     }:join_tostring("\n")
     
@@ -59,7 +81,10 @@ end
 
 function app_proto:main()
     app_proto.main = nil
-    if #app.parameters.subcommand <= 0 then print_information_and_exit(); return end
+    local subcommand = app.parameters.subcommand
+    if #subcommand <= 0 then print_information_and_exit(); return end
+    local feature = subcommand[1]
+    local feature_args = pack(unpack(subcommand, 2))
 
 end
 

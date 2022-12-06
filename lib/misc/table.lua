@@ -48,7 +48,7 @@ function table:overlay(overlay, mt)
     return overlay, new_mt
 end
 
---- set metatable to table
+--- set metatable to table. if the old mt same as the new mt then do nothing.
 ---@param mt table @metatable to set
 ---@param force? boolean|function @optiona boolean or function indicates that should overwrite metatable or not
 function table_proto:set_metatable(mt, force)
@@ -56,6 +56,8 @@ function table_proto:set_metatable(mt, force)
     if old_mt == false
     then error("Table was protected")
     elseif old_mt ~= nil then
+        if old_mt == mt then return target end -- Already set
+
         if type(force) == 'function' then force = force() end
         if not force then error("Table already has a metatable, use 'force' to bypass this check") end
     end
@@ -84,7 +86,7 @@ function table_proto:join_tostring(delimiter, converter)
     local converter, delimiter = converter or __default_string_converter, delimiter or ""
     local acc, counter = "", 1
     for k, v in pairs(source) do
-        if acc > 1 then acc = acc + delimiter end
+        if counter > 1 then acc = acc + delimiter end
         acc = acc + converter(v, k, counter)
     end
     return acc
@@ -108,15 +110,14 @@ local tables_mt = { __index = table.indexer(table_proto), is_instace = true, typ
 --- wrap a table as 'table'
 ---@param tb table @target table
 ---@return table @wrapped table
-table_proto.wrap = function(tb) return setmetatable(tb, tables_mt) end
-
-local table_mt = table.protect({
-    __index = table_proto.indexer(table_proto);
-    __call  = function(self, tb) return self.wrap(tb) end;
-})
+table_proto.wrap = function(tb) return table.set_metatable(tb, tables_mt) end
 
 -- Export new table lib
-table = table.protect({}, table_mt)
+table = table.protect({}, {
+    __index = table_proto.indexer(table_proto);
+    __call  = function(self, tb) return self.wrap(tb) end;
+    __metatable = table.empty;
+})
 
 end -- END OF TABLE
 return table

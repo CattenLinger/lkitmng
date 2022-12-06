@@ -2,7 +2,7 @@ local table = require "misc.table"
 --------------------------------------------------------------------------------------------------------------------------------
 if not array then -- Array lib
 --------------------------------------------------------------------------------------------------------------------------------
-local array_proto = {}
+local array_proto = setmetatable({}, { __index = table })
 ---@class array : table
 
 --- Reverse this array in place, return the origin table reference
@@ -28,7 +28,7 @@ local arraies_mt = { __index = table.indexer(array_proto), is_instance = true, t
 --- Wrap a table as operatable array
 ---@param arr table
 ---@return table
-array_proto.wrap = function(arr) return setmetatable(arr, arraies_mt) end
+array_proto.wrap = function(arr) return table.set_metatable(arr, arraies_mt) end
 
 local array_mt = table.protect({
     __index = table.indexer(array_proto),
