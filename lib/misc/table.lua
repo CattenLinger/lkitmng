@@ -83,11 +83,13 @@ local __default_string_converter = function(v) return tostring(v) end
 ---@param converter? fun(value : any, key : string|integer, counter : integer):string @optional converter, default is tostring(value)
 function table_proto:join_tostring(delimiter, converter)
     local source = self
-    local converter, delimiter = converter or __default_string_converter, delimiter or ""
     local acc, counter = "", 1
+    local converter, delimiter = (converter or __default_string_converter), (delimiter or "")
     for k, v in pairs(source) do
-        if counter > 1 then acc = acc + delimiter end
-        acc = acc + converter(v, k, counter)
+        if counter > 1 then acc = acc .. delimiter end
+        local transformed = converter(v, k, counter)
+        acc = acc .. transformed
+        counter = counter + 1
     end
     return acc
 end

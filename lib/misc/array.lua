@@ -24,6 +24,23 @@ function array_proto:reversed()
 	return target
 end
 
+local __default_string_converter = function(v) return tostring(v) end
+--- join collection items to string
+---@param delimiter? string @delimiter, default is empty string
+---@param converter? fun(value : any, key : string|integer, counter : integer):string @optional converter, default is tostring(value)
+function array_proto:join_tostring(delimiter, converter)
+    local source = self
+    local acc, counter = "", 1
+    local converter, delimiter = (converter or __default_string_converter), (delimiter or "")
+    for k, v in ipairs(source) do
+        if counter > 1 then acc = acc .. delimiter end
+        local transformed = converter(v, k, counter)
+        acc = acc .. transformed
+        counter = counter + 1
+    end
+    return acc
+end
+
 local arraies_mt = { __index = table.indexer(array_proto), is_instance = true, type = 'array' }
 --- Wrap a table as operatable array
 ---@param arr table

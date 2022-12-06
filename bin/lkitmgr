@@ -24,7 +24,7 @@ string = string do -- Minimal string lib
 ---
 ---@param self string 
 ---@param another any
-getmetatable("").__add = function(self, another) return self .. tostring(another) end
+getmetatable("").__add = function(self, another) return tostring(self) .. tostring(another) end
 
 --- format string, same as string.format
 function fstring(...) return string.format(...) end
