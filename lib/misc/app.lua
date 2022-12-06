@@ -3,20 +3,17 @@ local fs, library = require "misc.fs", require "misc.library"
 if not library "app" then -- App Lib
 --------------------------------------------------------------------------------------------------------------------------------
 local app_proto = app
-function app_proto:msg(...)
-    if self.quiet then return end
-    stderr(...)
-end
+--- show message via stderr to user, controlled by `app.quite`
+---@vararg string @string with optional formatting
+function app_proto:msg(...) if self.quiet then return end; stderr(...) end
 
-function app_proto:info(...)
-    if self.quite or not self.verbose then return end
-    stderr(...)
-end
+--- show verbose info via stderr to user, controlled by `app.verbose`
+---@vararg string @string with optional formatting
+function app_proto:info(...) if self.quite or not self.verbose then return end; stderr(...) end
 
-function app_proto:dbg(...)
-    if self.quite or not self.debug then return end
-    stderr(...)
-end
+--- show debug message via stderr to user, controlled by `app.debug`
+---@vararg string @string with optional formatting
+function app_proto:dbg(...) if self.quite or not self.debug then return end; stderr(...) end
 
 
 local features = table {}
@@ -32,10 +29,17 @@ function app_proto:list_feature_files()
     return target
 end
 
+local features_proto = {}
+
+function features_proto:has_entry() return (not (not self.entry)) end
+function features_proto:has_store() return (not (not self.store)) end
+function features_proto:has_service() return (not (not self.service)) end
+function features_proto:has_dsl_def() return (not (not self.dsl)) end
+
 local function create_feature(name, proto)
     if features[name] then error(fstring("Feature %q already exists", name)) end
     local feature = table.protect({}, {
-        __index = table.indexer(proto),
+        __index = table.indexer(proto, features_proto),
         __call = function(self, ...) self:entry(...) end,
         __metatable = table.protect({ lib_name = name, is_instance = true, type = 'feature' })
     })
@@ -43,21 +47,17 @@ local function create_feature(name, proto)
     return feature
 end
 
-local function create_feature_load_env(initial)
-    return table.overlay(_G, initial)
-end
+local function create_feature_load_env(initial) return table.overlay(_G, initial) end
 
 local function load_feature(name, chain)
     local existed = features[name]
     if existed then return existed end
 
-    if chain == nil then chain = {}
-    elseif chain[name] then error("Cricular dependency detected: " + array(chain):join_tostring(" -> ", function(value) 
-        if value == name
-        then return "[" + value + "]"
-        else return value
-        end
-    end))
+    if chain == nil then chain = {} elseif chain[name] then error("Cricular dependency detected: " + array(chain):join_tostring(
+        " -> ", 
+        function(value) 
+            if value == name then return "[" + value + "]" else return value end
+        end))
     end
 
     chain[name] = true
@@ -74,7 +74,7 @@ local function load_feature(name, chain)
     local _, feature, err = pcall(block)
     if not feature then return nil, fstring("Cloud not evaluate feature %q, error: %s", name, err) end
 
-    if (not typeof(feature) == 'feature') or (not feature.entry) then 
+    if (not typeof(feature) == 'feature') or (not feature:has_entry()) then 
         error(fstring("Invalid definition of feature %q. Created by 'create_feature' and entry function are required.", name)) 
     end
     features[name] = feature
@@ -95,6 +95,10 @@ local function print_information_and_exit()
     }:join_tostring("\n")
     
     os.exit(0, str)
+end
+
+function app_proto:feature(name)
+    return self.features[name]
 end
 
 function app_proto:main()
