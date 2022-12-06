@@ -35,6 +35,19 @@ function table_proto:indexer(...)
     end
 end
 
+--- create a protected table overlay
+---@param overlay? table @optional overlay table
+---@param mt?      table @optional metatable fields, will be copied to new metatable
+---@return table @overlay result
+---@return table @overlay metatable
+function table:overlay(overlay, mt)
+    local overlay = overlay or {}
+    local new_mt = { __index = table.indexer(self), __metatable = table.empty }
+    if mt then table.dump(mt, new_mt) end
+    setmetatable(overlay, new_mt)
+    return overlay, new_mt
+end
+
 --- set metatable to table
 ---@param mt table @metatable to set
 ---@param force? boolean|function @optiona boolean or function indicates that should overwrite metatable or not
@@ -94,7 +107,7 @@ local tables_mt = { __index = table.indexer(table_proto), is_instace = true, typ
 --- wrap a table as 'table'
 ---@param tb table @target table
 ---@return table @wrapped table
-table_proto.wrap = function(tb) return table_proto.set_metatable(tb, tables_mt) end
+table_proto.wrap = function(tb) return setmetatable(tb, tables_mt) end
 
 local table_mt = table.protect({
     __index = table_proto.indexer(table_proto);

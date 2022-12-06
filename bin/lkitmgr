@@ -69,7 +69,7 @@ end
 
 ---@type table @a protected empty table
 table.empty = (function()
-	local empty = {}
+	local empty = { __readonly__ = true }
 	return table.protect(empty, { __metatable = empty })
 end)()
 
@@ -278,6 +278,7 @@ app.initialization = function(args)
 			" -i | --info     Print informations \n";
 			" -h | --help     Print this help \n";
 			" -v | --verbose  Enable verbose message \n";
+			" -q | --quiet    Supress all messages \n";
 		}, function(acc, value) return acc + value end, "")
 	end
 
@@ -299,6 +300,7 @@ function app.main(args)
 	for _, arg in ipairs(app.parameters.manager) do
 		if     arg == '-d' or arg == '--debug'   then app.debug   = true
 		elseif arg == '-v' or arg == '--verbose' then app.verbose = true
+		elseif arg == '-q' or arg == '--quiet'   then app.quiet   = true
 		elseif arg == '-h' or arg == '--help'    then os.exit(0, app:build_help_string())
 		elseif arg == '-i' or arg == '--info'    then os.exit(0, app:build_info_string())
 		end
