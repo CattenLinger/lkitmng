@@ -28,6 +28,16 @@ getmetatable("").__add = function(self, another) return self .. tostring(another
 --- format string, same as string.format
 function fstring(...) return string.format(...) end
 
+string.lines = function(str)
+	local s = str
+	if s:sub(-1) ~= "\n" then s = s +"\n" end
+    return s:gmatch("(.-)\n")
+end
+
+string.trim = function(s)
+	return s:match "^%s*(.-)%s*$"
+end
+
 end -- END STRING
 
 --------------------------------------------------------------------------------------------------------------------------------
@@ -91,6 +101,15 @@ function shell:template(template)
 	end
 end
 
+shell.which = (function(cmd)
+	local template = shell:template(cmd)
+	return function(name)
+		local result, success, state, exit_code = template(name)
+		if result then return result:trim() end
+		return nil, success, state, exit_code
+	end
+end)("which '%s' 2> /dev/null")
+
 end -- END SHELL
 
 --------------------------------------------------------------------------------------------------------------------------------
@@ -106,75 +125,26 @@ os.executable = function(template)
 	end
 end
 
-end -- END OS
-
---- Array base
---- Define array base class
-array = setmetatable({}, { __index = table })
-
---- Reverse this array in place, return the origin table reference
----@param arr table
----@return table
-array.reverse_in_place = function(arr)
-	local n = #arr
-	local m = n / 2
-	for i = 1, m do arr[i], arr[n - i + 1] = arr[n - i + 1], arr[i] end
-	return arr
-end
-
-array.reversed = function(arr)
-	local result = array { }
-	for i=#arr, 1, -1 do result[#result + 1] = arr[i] end
-	return result
-end
-
---- Wrap a table as operatable array
----@param arr table
----@return table
-array.wrap = function(arr)
-	return setmetatable(arr, { __index = array })
-end
-
---- Select array content with a filter, returns a new array
---- Filter function gives two value, the first is a value, the second is the index
----@param arr table
----@param filter function
-array.filter = function(arr, filter)
-	local result = array { }
-	for index, value in ipairs(arr) do 
-		if filter(value, index) then result:insert(value) end
+--- require a command, throw error if no such command
+---@param name string @comamnd name
+---@param msg? string @optional string message
+os.require_command = (function(template)
+	local executable = os.executable(template)
+	local default_error_template = "Require command %q"
+	return function(name, msg)
+		if not executable(name) then error(msg or default_error_template:format(name)); end
 	end
-	return result
-end
+end)("command -v '%s' 2>&1 > /dev/null")
 
--- shadow table for other array instance
-local array_shadow = table.shadow_of(array, {
-	__tostring = function(self) return "array" end,
-	__call     = function(self, array) return self.wrap(array) end
-})
-
--- lock the array table
-array = setmetatable({}, array_shadow)
-
--- END ARRAY BASE
-
---
--- OS utils
---
-
-os.require_command = function(name, msg)
-	local template = "command -v '%s' 2>&1 > /dev/null"
-	local success = os.execute(template:format(name)) or false
-	if not success then error(msg or "Require command '"..name.."'"); end
-end
-
-os.basename = function()
-	local template = "basename $(which '%s')"
-	local handle = io.popen(template:format(arg[0]))
-	local basename = handle:read()
-	handle:close()
-	return basename
-end
+--- get basename of a path string
+---@param name string @path
+---@return string @basename of this path
+os.basename = (function(cmd)
+	local template = shell.template(cmd)
+	return function(name)
+		return template(name)
+	end
+end)("basename $(which '%s')")
 
 os.executable = function()
 	local template = "which '%s'"
@@ -184,81 +154,63 @@ os.executable = function()
 	return name
 end
 
-local function __string_output(...)
-	local args = table.pack(...)
-	if not args then return end
-	local length = #args
-	if length == 1 then return args[1] end
-	return args[1]:format(table.unpack(args, 2))
-end
 --- put content to stdout
 ---@param str string
-function stdout(...) io.stdout:write(__string_output(...)) end
+function stdout(...) io.stdout:write(fstring(...)) end
 
 --- put content to stderr
 ---@param str string
-function stderr(...) io.stderr:write(__string_output(...)) end
+function stderr(...) io.stderr:write(fstring(...)) end
 
-function dbglog(...)
-	if not __verbose__ then return end
-	stderr("[ DEBUG ] " + __string_output(...))
-end
+--- exit program, with optional message
+---@param exit_code? integer @optional exit code
+---@param msg? string        @optional message write to stderr
+os.exit = (function(origin)
+	return function(exit_code, msg)
+		local exit_code = exit_code or 0
+		if msg then stderr("%s\n", msg) end
+		origin(exit_code)
+	end
+end)(os.exit)
 
---
--- FileSystem Utils
---
+end -- END OS
 
---- The filesystem base object
-fs = {}
-
+--------------------------------------------------------------------------------------------------------------------------------
+fs = {} do -- Minimal FileSystem lib
+--------------------------------------------------------------------------------------------------------------------------------
 --- check if directory exists or is a directory
 ---@param path string
 ---@return boolean
-fs.is_directory_exists = function(path)
-	local success = os.execute("test -d '" + path + "'")
-	return success or false
-end
+fs.is_directory_exists = (function(cmd)
+	local template = os.executable(cmd)
+	return function(path)
+		return template(path) or false
+	end
+end)("test -d %q 2>&1 > /dev/null")
 
 --- check if file exists or is a file
 ---@param path string
 ---@return boolean
-fs.is_file_exists = function(path)
-	local success = os.execute("test -f '" + path + "'")
-	return success or false
-end
-
-fs.work_dir = (function ()
-	local handle = io.popen("pwd")
-	local path = handle:read()
-	local success = handle:close()
-	if not success then error("Could not get current directory!\n"); end
-	return path
-end)()
-
-fs.list_file = function(path)
-	local handle = io.popen("ls -1 '"..path.."'")
-	local list={}
-	for line in handle:lines() do
-		table.insert(list,line)
+fs.is_file_exists = (function(cmd)
+	local template = os.executable(cmd)
+	return function(path)
+		return template(path) or false
 	end
-	local success = handle:close() or false
-	return list, success
+end)("test -f %q 2>&1 > /dev/null")
+
+--- Do filesystem initialization
+--- This method can only be invoke once.
+fs.initialization = function()
+	fs.work_dir = (function ()
+		local handle, success, state, exit_code = shell:execute("pwd")
+		if not handle then error("Could not get current directory"); end
+		return path
+	end)()
+
+	fs.initialization = function() end
 end
 
-function fs:init_temp_dir()
-	local location = "/tmp/.." os.tempname()
-	local success = os.execute("mkdir -p '"..location.."'")
-	if not success then error("Could not create temp directory '"..location.."'") end
-	self.temp_location = location
-	return location
-end
-
-function fs:destroy_temp_dir()
-	local location = self.temp_location
-	if not location then error("Temp directory is not initialized!") end
-	local success = os.execute("rm -rf '" .. location .. "'")
-	if not success then error("Cannot delete temp directory '"..location.."'") end
-end
+end -- END FS
 
 --
 -- Setting up
