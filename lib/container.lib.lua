@@ -1,104 +1,133 @@
 os.require_command "docker"
 os.require_command "jq"
 
+local fs, dsl_context = require "misc.fs", require "dsl_context_builder"
 
+local commands = {
+	list_config            = shell:template("ls -1 %q 2> /dev/null | grep -E '^.+?\\.container\\.conf$'");
+	container_status       = shell:template("docker container inspect '%s' 2> /dev/null | jq '.[0].State.Status'");
+	container_start        = shell:template("docker start %q 2> /dev/null");
+	container_stop         = shell:template("docker stop  %q 2> /dev/null");
+	container_remove       = shell:template("docker rm %q 2> /dev/null");
+	container_remove_force = shell:template("docker rm -f %q 2> /dev/null");
+}
 
-local store_proto = {}
+-- dsl method registry
+local dsl_methods = table { }
 
-store_proto.real_name_of = function (origin_name)
-	if type(origin_name) ~= "string" then error("Origin container name should be a string") end
-	local provider = service:provider "container_name"
-	if not provider then return origin_name end
-	return provider(origin_name)
-end
+-- config data store
+local store = {
+	containers = table { };
+}
 
-store_proto.data_path_of = function (origin_name)
-	local volumes = stores.volume
-	if not volumes then return null end
-	return volumes:data_path_of(origin_name)
-end
-
-store_proto.network_name_of = function(container)
-	local networks = stores.network
-	if not networks then return container.name end
-	local network = networks:network_of(container)
-	if not network then return container.name end
-	return network.name
-end
-
-function store_proto:container_names()
-	local names = array {}
-	for key, _ in pairs(self) do names:insert(key) end
-	return names
-end
-
-function store_proto:container_list()
-	local containers = array { }
-	for _, value in pairs(self) do containers:insert(value) end
-	return containers
-end
-
-function store_proto:container_not_null(origin_name)
-	local container = self[origin_name] or error("No such container: " + origin_name)
+function store:container_not_null(name)
+	local container = self.containers[name]
+	if not container then error(fstring("Container %q undefined.", name)) end
 	return container
 end
 
-local store_mt = { __index = store_proto }
-local store    = setmetatable({}, store_mt)
+-- config manager
+local configs = {
+	path = app.path.home + "/conf.d";
+}
+configs.dir_exists = fs.is_directory_exists(config_path)
+
+--- list all configuration files. if no file or faailed to load, returns an empty array.
+---@return array @array of files
+function configs:files()
+	local collection, path = array {}, self.path
+	if not is_config_dir_exists then goto return_collection end
+
+	local result, success, flag, exit_code = commands.list_config(path)
+	if not success then
+		app:dbg("Failed to list configuration files from %q. Process state %s, exit code %d.", path, flag, exit_code)
+		goto return_collection
+	end
+
+	for file in result:lines() do collection:insert(file) end
+
+	::return_collection::
+	return collection
+end
+
+--- reload all config files
+---@return table @dsl context
+function configs:reload()
+	local path, dir_exists = self.path, self.dir_exists
+	if not dir_exists then
+		app:msg("Configuration directory %q does not exists, try to create one.", path)
+		if not fs:mkdir(config_path) then error(fstring("Could not create configuration directory %q !", path)) end
+	end
+
+	local context, files = dsl_context(dsl_context:dump()), self:files()
+	if files:count() <= 0 then goto return_context end
+
+	-- reset store
+	store = table {}
+	for _, file in files:pairs() do
+		local chunk, err = loadfile(config_path + file, "t", context)
+		if not chunk then error(fstring("Could not load configuration file %q. Error: %s", file, err)) end
+
+		local success, result, err = pcall(chunk)
+		if not success then error(fstring("Could not load configuration file %q. Error: %s", file, err)) end
+	end
+
+	::return_context::
+	return context
+end
 
 -- Container methods
 
 local container_proto = {}
 
+--- Read container status from docker
+--- json path: `.[0].State.Status`
+---@return string|nil @string state of container, if docker returns `null` then it will returns `nil`
 function container_proto:state()
 	local real_name = self.real_name
-	local template = "docker container inspect '%s' 2> /dev/null | jq '.[0].State.Status'"
-	local handle = io.popen(template:format(real_name))
-	local state_str = handle:read(); handle:close()
-	if not state_str then error(string.format("Could not read container state of '%s' from docker!", real_name)) end
+	local result, success, flag, exit_code = commands.container_status(real_name)
+	result = result or error(fstring("Could not read container state of %q. Process status: %s, exit code %d", real_name, flag, exit_code))
+
+	local state_str = result:trim()
 	if state_str == "null" then return nil end
 	return state_str:gsub('"(%a+)"',"%1")
 end
 
+--- get depended containers
+---@return array @list of containers
 function container_proto:depended_containers()
 	local dependencies = self.dependencies
-	if dependencies then
-		if type(dependencies) == 'string' then return array { store:container_not_null(dependencies) } end
-
-		local list = array {}
-		for _, dep in pairs(dependencies) do list:insert(store:container_not_null(dep)) end
-		return list
-	end
-	return array { }
+	if not dependencies then return array {} end
+	if type(dependencies) == 'string' then return array { store:container_not_null(dependencies) } end
+	return table.map(dep, function(value) store:container_not_null(value) end)
 end
 
-function container_proto:information_string()
-	local container      = self
-	local origin_name    = self.name
-	local container_name = self.real_name
-	local state          = self:state() or "<unavailable>"
-
-	local template = "Container [ %s ] \n"
-	               + "    State        : %s \n"
-				   + "    Real Name    : %s \n"
-				   + "    Data Path    : %s \n"
-				   + "    Dependencies : %s"
-
-	local data_path = store.data_path_of(origin_name) or "<unavailable>"
-
-	local deps = container:depended_containers()
-	local dep_str = "<no dependencies>"
-	if #deps > 0 then dep_str = deps:join_to_string(", ", function (value) return value.name end) end
-
-	return template:format(origin_name, state, container_name, data_path, dep_str)
+--- build string information for a container
+---@return string @string information
+function container_proto:info_tostring()
+	return table {
+		fstring("Container [ %s ] \n"     , self.name);
+		fstring("    State        : %s \n", self:state() or "<unavailable>");
+		fstring("    Real Name    : %s \n", self.real_name);
+		fstring("    Data Path    : %s \n", self:data_path());
+		fstring("    Dependencies : %s \n", (function()
+			local deps = self:depended_containers()
+			if deps:count() > 0 then return deps:join_tostring(", ", function (value) return value.name end) end
+			return "<no dependencies>"
+		end)());
+	}:join_tostring()
 end
 
--- Container DSL
+-- Container
 
 local container_mt = {
 	__index = container_proto,
 	__call  = function(self, config) self:configure(config) end,
-	__metatable = container_proto
+	__metatable = table.protected({
+		__index     = container_proto;
+		is_instance = true;
+		type        = "container";
+	})
 }
 
 function container_proto:configure(table)
@@ -110,78 +139,21 @@ function container_proto:configure(table)
 	return self
 end
 
-registry.dsl_context.container = function(name, config)
+-- DSL
+
+function dsl_methods:container(name, config)
+	assert(name and (typeof(name) == "string"), "#name(string) is required")
+
 	local container = setmetatable(config or store[name] or {}, container_mt)
 	container.name = name
-	container.real_name = store.real_name_of(name)
-	store[name] = container
+	container.real_name = container_proto.real_name_of(name)
+	local container_store = store.containers or {}
+	container_store[name] = container
+	store.containers = container_store
 	return container
 end
 
-local dependency_resolver = setmetatable({}, {
-	__call = function(self, container) return self.create(container) end 
-})
-local dependency_resolver_mt = { __index = dependency_resolver }
-dependency_resolver.create = function(container)
-	local root = { container = container, next = nil }
-	local state = { priorities = {}, stack = root, root = root, depth = 1 }
-	root.next = root
-	return setmetatable(state, dependency_resolver_mt)
-end
-function dependency_resolver:check_cricular(current)
-	local root, anchor, pointer = self.root, current, current.next
-	while pointer ~= anchor do
-		if pointer.container.name == anchor.container.name then error("Cricular dependency: " + self:stack_tostring(anchor)) end
-		pointer = pointer.next
-	end
-end
-function dependency_resolver:resolve()
-	local current, container = self.stack, self.stack.container
-	local name, deps = container.name, container:depended_containers()
-
-	-- update the priority
-	local priority = self.priorities[name] or 0
-	if self.depth > priority then self.priorities[name] = self.depth end
-	
-	if #deps <= 0 then return end -- no depdency, exit the iteration
-
-	self:check_cricular(current)
-
-	for _, dep in ipairs(deps) do
-		-- insert current to the cycled linkedlist
-		local next = { container = dep, next = current.next }
-		current.next = next
-		self.stack = next
-		self.depth = self.depth + 1
-		-- resolve deps recursively
-		self:resolve()
-		-- remove current from the cycled linkedlist
-		current.next = next.next
-		next.next = nil
-		self.depth = self.depth - 1
-	end
-end
-function dependency_resolver:stack_tostring(highlight)
-	local str, count, pointer = "", 1, self.root
-	repeat
-		if count > 1 then str = str + " -> " end
-		local name = pointer.container.name
-		if name == highlight.container.name then 
-			str = str + "[" + name + "]"
-		else
-			str = str + name
-		end
-		count = count + 1
-		pointer = pointer.next
-	until pointer == self.root
-	return str
-end
-local __dependency_reverse_sort = function(a, b) return a[1] > b[1] end
-local function flatten_dependencies(container)
-	local resolver = dependency_resolver(container)
-	resolver:resolve()
-	return table(resolver.priorities):sort_by_value(__dependency_reverse_sort)
-end
+local dependency_resolver = require "dependency_resolver"
 
 local container_create_env_template="CONTAINER_NAME='%s' VOLUME_PATH='%s' NETWORK_NAME='%s' IMAGE_NAME='%s'"
 local function create_container_simple(origin_name)
@@ -222,16 +194,6 @@ local function create_container(container)
 	for _, name in ipairs(dependencies) do create_container_simple(name) end
 end
 
-local function start_container_simple(container)
-	local template = "docker start '%s'"
-	local name = container.name
-	local real_name = store.real_name_of(name)
-	print("Start container: " + name)
-	local script = template:format(real_name)
-	local result, flag, exit_code = os.execute(template)
-	if not result then error(string.format("Could not start container '%s'. Process state: %s, exit code: %d", name, flag, exit_code)) end
-end
-
 local function start_container(container)
 	local state = container:state()
 	if not state then stdout("Container did not created: " + origin_name + "\n"); return end
@@ -253,16 +215,6 @@ local function start_container(container)
 		print("Start container: " + name)
 		local script = template:format(real_name)
 	end
-end
-
-local function stop_container_simple(container)
-	local template = "docker stop '%s'"
-	local name = container.name
-	local real_name = container.real_name
-	print("Stop container: " + name)
-	local script = template:format(real_name)
-	local result, flag, exit_code = os.execute(script)
-	if not result then error(string.format("Container '%s' stop failed. Process state: %s, exit code: %d", name, flag, exit_code)) end
 end
 
 local function stop_container(container)
@@ -303,14 +255,6 @@ local function stop_all_containers(containers)
 	if #aggregation <= 0 then stdout("All containers are stopped. \n"); return end
 	for _, container in ipairs(aggregation) do stop_container_simple(container) end
 end
-
-local function remove_container(container)
-	stdout("Remove container '" + container.name + "' \n")
-	local command = "docker rm '" + container.real_name + "'"
-	local result, flag, exit_code = os.execute(command)
-	if not result then stdout("Stop container failed. Process state: " + result + ", exit code: " + exit_code + "\n") end
-end
-
 
 -- Handlers
 
@@ -402,18 +346,4 @@ local handlers = {
 			remove_container(store:container_not_null(origin_name))
 		end
 	end
-}
-
--- Entry
-
-local function entry(...)
-	local args = table.pack(...)
-	local handler_name = args[1] or "list"
-	local handler = handlers[handler_name] or error("Unknown command '" + handler_name + "'")
-	handler(table.unpack(args, 2))
-end
-
-return {
-	store = store,
-	entry = entry
 }

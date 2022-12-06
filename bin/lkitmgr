@@ -265,6 +265,7 @@ app.initialization = function(args)
 	path.libraries = path.home + "/lib"
 
 	-- add lib path to lua path
+	package.path = path.libraries + "/?.lib.lua;" + package.path
 	package.path = path.libraries + "/?.lua;" + package.path
 
 	app.path = path

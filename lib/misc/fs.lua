@@ -20,6 +20,18 @@ function fs_proto:list_files(path)
     return list
 end
 
+local command_mkdir = shell:template("mkdir %q 2> /dev/null")
+function fs_proto:mkdir(path)
+	local _, success, flag, exit_code = command_mkdir(path)
+	return (success or false), flag, exit_code
+end
+
+local command_mkdirs = shell:template("mkdir -p %q 2> /dev/null")
+function fs_proto:mkdirs(path)
+	local _, success, flag, exit_code = command_mkdirs(path)
+	return (success or false), flag, exit_code
+end
+
 function fs_proto:init_temp_dir()
 	local location = "/tmp/" + os.tempname()
 	local success = os.execute(fstring("mkdir -p '%s'", location))
