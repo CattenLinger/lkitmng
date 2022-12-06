@@ -1,9 +1,9 @@
 #!/usr/bin/env lua
-
+-- temrporal enable debugger
+if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then require("lldebugger").start() end
 --------------------------------------------------------------------------------------------------------------------------------
 -- Bootstrap
 --------------------------------------------------------------------------------------------------------------------------------
-if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then require("lldebugger").start() end
 
 ---@type string @os type, unix(linux) or nt
 os.type = (function(condition)
@@ -72,6 +72,13 @@ table.empty = (function()
 	local empty = {}
 	return table.protect(empty, { __metatable = empty })
 end)()
+
+--- create an simple index function for a table
+---@param self table @target table
+---@return fun(ignored: any, key : string|integer) @index function of origin table
+table.indexer = function(self)
+	return function(_, key) return self[key] end
+end
 
 --- Fold table to value
 ---@generic T : any
@@ -296,6 +303,9 @@ function app.main(args)
 		elseif arg == '-i' or arg == '--info'    then os.exit(0, app:build_info_string())
 		end
 	end
+
+	-- App entry
+	(require 'misc.entry')()
 end
 
 end -- END APP
