@@ -59,99 +59,54 @@ end
 ---@type table @a protected empty table
 table.empty = (function()
 	local empty = {}
-	empty.__metatable = empty
 	return table.protect(empty, { __metatable = empty })
 end)()
 
+end -- END TABLE
+
+--------------------------------------------------------------------------------------------------------------------------------
+shell = {} do -- Minimal shell lib
+--------------------------------------------------------------------------------------------------------------------------------
+
+--- Execute a shell command, wait and return stdout result
+---@param command string @shell command
+---@return string        @result lines
+---@return boolean|nil   @success or not
+---@return string        @process state 
+---@return integer       @exit code
+shell.execute = function(command)
+	local pipe, error = io.popen(command)
+	if not pipe then return nil, ("Could not open pipe for command: " + command) , error end
+	local lines = pipe:read("*a")
+	local result, state, exit_code = pipe:close()
+	return lines, result, state, exit_code
 end
 
---- Swap keys' and values' role, return a new array
----@param tb table
----@return table
-table.number_values_as_key = function(tb)
-	local result = {}
-	for value, key in pairs(tb) do table.insert(result, key, value) end
-	return array(result)
-end
-
-local __default_sort_comparator = function(a, b) return a[1] < b[1] end
-table.sort_by_value = function(tb, comparator)
-	local comparator = comparator or __default_sort_comparator
-	local result = array {}
-	for key, value in pairs(tb) do result:insert({ value, key }) end
-	result:sort(comparator)
-	return result:map(function(v) return v[2] end)
-end
-
---- wrap a raw table, return the wrapped table
----@param tb table
----@return table
-table.wrap = function(tb) return setmetatable(tb, { __index = table }) end
-
---- Select table entry with a filter, returns a new table
---- Filter function gives two value, the first is a value, the second is the key
----@param table table
----@param filter function
-table.filter = function(table, filter)
-	local result = {}
-	for key, value in pairs(table) do 
-		if filter(value, key) then result[key] = value end
+--- Create a shell execute template
+---@param template string @shell command string template
+function shell:template(template)
+	return function(...)
+		local command = template:format(...)
+		return self.execute(command)
 	end
-	return result
 end
 
-table.map = function(tb, mapper)
-	local result = array {}
-	for key, value in pairs(tb) do
-		result:insert(mapper(value, key))
+end -- END SHELL
+
+--------------------------------------------------------------------------------------------------------------------------------
+os = os do -- Minimal os lib
+--------------------------------------------------------------------------------------------------------------------------------
+
+--- create an executable template
+---@param template string @shell command string
+---@return fun(...) @a function that execute the shell command with arguments
+os.executable = function(template)
+	return function(...)
+		return os.execute(template:format(...))
 	end
-	return result
 end
 
-local __default_join_to_string_converter = function(value) return tostring(value) end
-table.join_to_string = function(tb, separator, converter)
-	local result = ""
-	local count = 1
-	local separator = separator or ""
-	local converter = converter or __default_join_to_string_converter
-	for key, value in pairs(tb) do
-		local converted = converter(value, key, count)
-		if count > 1 then
-			result = result + separator + converted 
-		else
-			result = result + converted
-		end
-		count = count + 1
-	end
-	return result
-end
-
---- calculate elements of this table
----@param tb table
-table.size = function(tb)
-	local count = 0
-	for _ in pairs(tb) do count = count + 1; end
-	return count
-end
-
-local fn_table_protected = function() error("protected table") end
-table.shadow_of = function (tb, template)
-	local result = template or {}
-	result.__index     = tb
-	result.__newindex  = fn_table_protected
-	result.__metatable = tb
-	return result
-end
-
--- shadow table of table
-local table_shadow = table.shadow_of(table, {
-	__call = function(self, table) return self.wrap(table) end
-})
-
--- lock the acient table
-table = setmetatable({}, table_shadow)
-
---- END TABLE BASE
+end -- END OS
 
 --- Array base
 --- Define array base class
