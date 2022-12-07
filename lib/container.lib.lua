@@ -3,6 +3,7 @@ os.require_command "jq"
 
 local fs, dsl_context = require "misc.fs", require "dsl_context_builder"
 
+-- all needed shell commands
 local commands = {
 	list_config            = shell:template("ls -1 %q 2> /dev/null | grep -E '^.+?\\.container\\.conf$'");
 	container_status       = shell:template("docker container inspect '%s' 2> /dev/null | jq '.[0].State.Status'");
@@ -30,7 +31,7 @@ end
 local configs = {
 	path = app.path.home + "/conf.d";
 }
-configs.dir_exists = fs.is_directory_exists(config_path)
+configs.dir_exists = fs.is_directory_exists(configs.path)
 
 --- list all configuration files. if no file or faailed to load, returns an empty array.
 ---@return array @array of files
